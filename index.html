@@ -869,11 +869,54 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function () {
   'use strict';
 
   const ANTHROPIC_API_KEY = '';
+
+  /* ---------- supabase sync ---------- */
+  /* Public publishable key + open RLS policies: fine for a single-user
+     personal dashboard, but anyone with these values can read/write
+     this data. Do not reuse this pattern for anything sensitive. */
+
+  const SUPABASE_URL = 'https://ehtaxcbwqhljfsnnludx.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_RTHPQaIvo4kCT8pNmOm_yA_I10i3p-k';
+
+  const supabaseClient = (typeof supabase !== 'undefined')
+    ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+    : null;
+
+  function syncSetToSupabase(key, value) {
+    if (!supabaseClient) return;
+    supabaseClient
+      .from('app_state')
+      .upsert({ key, value, updated_at: new Date().toISOString() })
+      .then(({ error }) => { if (error) console.error('Supabase sync (set) failed:', error.message); });
+  }
+
+  function syncDeleteFromSupabase(key) {
+    if (!supabaseClient) return;
+    supabaseClient
+      .from('app_state')
+      .delete()
+      .eq('key', key)
+      .then(({ error }) => { if (error) console.error('Supabase sync (delete) failed:', error.message); });
+  }
+
+  async function pullFromSupabase() {
+    if (!supabaseClient) return;
+    try {
+      const { data, error } = await supabaseClient.from('app_state').select('key, value');
+      if (error) { console.error('Supabase pull failed:', error.message); return; }
+      (data || []).forEach(row => {
+        localStorage.setItem(row.key, JSON.stringify(row.value));
+      });
+    } catch (e) {
+      console.error('Supabase pull failed:', e);
+    }
+  }
 
   /* ---------- storage helpers ---------- */
 
@@ -888,10 +931,12 @@
     if (key.indexOf('goals:') === 0) {
       window.dispatchEvent(new CustomEvent('goals-changed'));
     }
+    syncSetToSupabase(key, value);
   }
 
   function storeDelete(key) {
     localStorage.removeItem(key);
+    syncDeleteFromSupabase(key);
   }
 
   function storeListKeys(prefix) {
@@ -1469,6 +1514,9 @@
 
   /* ---------- init ---------- */
 
+  async function init() {
+  await pullFromSupabase();
+
   checkStreak();
   rollover();
 
@@ -1516,6 +1564,9 @@
   setInterval(updateDayRing, 60 * 1000);
 
   startTicker();
+  }
+
+  init();
 })();
 </script>
 </body>
